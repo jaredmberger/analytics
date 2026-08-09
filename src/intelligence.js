@@ -148,7 +148,16 @@ async function buildIntelligence(request, env, ctx) {
   };
 }
 
-function json(payload, status = 200) {
+function responseFor(payload, status, callback) {
+  if (callback && /^[A-Za-z_$][0-9A-Za-z_$\.]*$/.test(callback)) {
+    return new Response(`${callback}(${JSON.stringify(payload)});`, {
+      status,
+      headers: {
+        'content-type': 'application/javascript; charset=utf-8',
+        'cache-control': 'no-store',
+      },
+    });
+  }
   return new Response(JSON.stringify(payload, null, 2), {
     status,
     headers: {
@@ -164,10 +173,11 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === '/api/curator-intelligence') {
+      const callback = url.searchParams.get('callback') || '';
       try {
-        return json(await buildIntelligence(request, env, ctx));
+        return responseFor(await buildIntelligence(request, env, ctx), 200, callback);
       } catch (error) {
-        return json({
+        return responseFor({
           ok: false,
           system: {
             id: 'analytics',
@@ -180,7 +190,7 @@ export default {
             url: 'https://analytics.oceanliners.net/',
           },
           priorities: [], opportunities: [], activity: [],
-        }, 500);
+        }, 500, callback);
       }
     }
     return analyticsApp.fetch(request, env, ctx);
