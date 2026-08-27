@@ -74,6 +74,18 @@ async function gaReport(env, token, body) {
   return data;
 }
 
+async function gaRealtimeReport(env, token, body) {
+  const propertyId = env.GA_PROPERTY_ID || '519622084';
+  const response = await fetch(`${GA_API}/properties/${propertyId}:runRealtimeReport`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(`Analytics Realtime API failed: ${data.error?.message || response.status}`);
+  return data;
+}
+
 function metric(row, index) { return Number(row?.metricValues?.[index]?.value || 0); }
 function dim(row, index) { return row?.dimensionValues?.[index]?.value || ''; }
 function pctChange(current, previous) {
@@ -216,6 +228,72 @@ async function buildDashboard(env, days) {
   return payload;
 }
 
+
+async function buildLiveDashboard(env) {
+  const token = await getAccessToken(env);
+
+  const [overview, pages, countries, devices, minutes] = await Promise.all([
+    gaRealtimeReport(env, token, {
+      metrics: [{ name: 'activeUsers' }, { name: 'screenPageViews' }],
+    }),
+    gaRealtimeReport(env, token, {
+      dimensions: [{ name: 'unifiedScreenName' }],
+      metrics: [{ name: 'activeUsers' }, { name: 'screenPageViews' }],
+      orderBys: [{ metric: { metricName: 'activeUsers' }, desc: true }],
+      limit: '12',
+    }),
+    gaRealtimeReport(env, token, {
+      dimensions: [{ name: 'country' }],
+      metrics: [{ name: 'activeUsers' }],
+      orderBys: [{ metric: { metricName: 'activeUsers' }, desc: true }],
+      limit: '10',
+    }),
+    gaRealtimeReport(env, token, {
+      dimensions: [{ name: 'deviceCategory' }],
+      metrics: [{ name: 'activeUsers' }],
+      orderBys: [{ metric: { metricName: 'activeUsers' }, desc: true }],
+      limit: '6',
+    }),
+    gaRealtimeReport(env, token, {
+      dimensions: [{ name: 'minutesAgo' }],
+      metrics: [{ name: 'activeUsers' }, { name: 'screenPageViews' }],
+      orderBys: [{ dimension: { dimensionName: 'minutesAgo' } }],
+      limit: '30',
+    }),
+  ]);
+
+  const overviewRow = overview.rows?.[0];
+
+  return {
+    ok: true,
+    generatedAt: new Date().toISOString(),
+    propertyId: env.GA_PROPERTY_ID || '519622084',
+    windowMinutes: 30,
+    current: {
+      activeUsers: metric(overviewRow, 0),
+      views: metric(overviewRow, 1),
+    },
+    pages: (pages.rows || []).map(row => ({
+      title: dim(row, 0) || '(untitled)',
+      activeUsers: metric(row, 0),
+      views: metric(row, 1),
+    })),
+    countries: (countries.rows || []).map(row => ({
+      country: dim(row, 0) || 'Unknown',
+      activeUsers: metric(row, 0),
+    })),
+    devices: (devices.rows || []).map(row => ({
+      device: dim(row, 0) || 'Unknown',
+      activeUsers: metric(row, 0),
+    })),
+    minutes: (minutes.rows || []).map(row => ({
+      minutesAgo: Number(dim(row, 0) || 0),
+      activeUsers: metric(row, 0),
+      views: metric(row, 1),
+    })),
+  };
+}
+
 async function runGaTest(env) {
   const token = await getAccessToken(env);
   const data = await gaReport(env, token, {
@@ -256,6 +334,13 @@ export default {
         const requested = Number(url.searchParams.get('days') || 28);
         const days = [7,28,90].includes(requested) ? requested : 28;
         return json(await buildDashboard(env, days));
+      } catch (error) {
+        return json({ ok:false, error:error instanceof Error?error.message:String(error) },500);
+      }
+    }
+    if (url.pathname === '/api/live') {
+      try {
+        return json(await buildLiveDashboard(env));
       } catch (error) {
         return json({ ok:false, error:error instanceof Error?error.message:String(error) },500);
       }
