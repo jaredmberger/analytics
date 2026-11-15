@@ -342,7 +342,9 @@ export default {
         const latest = rows[0]?.hour || null;
         // Generate 24 consecutive property-local hourly labels from the newest
         // reported hour. Do not fill missing hours with inferred traffic.
-        const recent = rows.slice(0,24);
+        const hourIndex = value=>Date.UTC(Number(value.slice(0,4)),Number(value.slice(4,6))-1,Number(value.slice(6,8)),Number(value.slice(8,10)))/3600000;
+        const latestIndex = latest ? hourIndex(latest) : null;
+        const recent = latestIndex === null ? [] : rows.filter(row=>hourIndex(row.hour)>latestIndex-24 && hourIndex(row.hour)<=latestIndex);
         const total = recent.reduce((sum,row)=>sum+row.sessions,0);
         return json({ok:true,source:'Google Analytics 4',metric:'sessions',approximate:true,
           sessions:total,hoursIncluded:recent.length,latestReportedHour:latest,
