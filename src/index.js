@@ -325,6 +325,31 @@ async function load(){const days=$('period').value;$('status').textContent='Refr
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname === '/api/rolling-sessions') {
+      try {
+        const token = await getAccessToken(env);
+        // GA4 dateHour uses the property's reporting timezone. These are hourly
+        // buckets, not an exact minute-by-minute trailing 24-hour interval.
+        const report = await gaReport(env, token, {
+          dateRanges:[{startDate:'yesterday',endDate:'today'}],
+          dimensions:[{name:'dateHour'}],
+          metrics:[{name:'sessions'}],
+          orderBys:[{dimension:{dimensionName:'dateHour'},desc:true}],
+          limit:'48',
+        });
+        const rows = (report.rows||[]).map(row=>({hour:dim(row,0),sessions:metric(row,0)}))
+          .filter(row=>/^\\d{10}$/.test(row.hour));
+        const latest = rows[0]?.hour || null;
+        // Generate 24 consecutive property-local hourly labels from the newest
+        // reported hour. Do not fill missing hours with inferred traffic.
+        const recent = rows.slice(0,24);
+        const total = recent.reduce((sum,row)=>sum+row.sessions,0);
+        return json({ok:true,source:'Google Analytics 4',metric:'sessions',approximate:true,
+          sessions:total,hoursIncluded:recent.length,latestReportedHour:latest,
+          generatedAt:new Date().toISOString(),
+          note:'Approximate sum of the 24 latest reported hourly session buckets, not an exact rolling 24-hour unique-session count. Hours with no rows and cross-hour sessions may affect the total. GA4 reporting can lag.'});
+      } catch(error) {return json({ok:false,error:'Hourly session counts are temporarily unavailable.'},502);}
+    }
     if (url.pathname === '/api/visitor-snapshot') {
       try {
         const token = await getAccessToken(env);
