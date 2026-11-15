@@ -325,6 +325,18 @@ async function load(){const days=$('period').value;$('status').textContent='Refr
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname === '/api/visitor-snapshot') {
+      try {
+        const token = await getAccessToken(env);
+        const [today, yesterday, daily, realtime] = await Promise.all([
+          gaReport(env, token, { dateRanges:[{startDate:'today',endDate:'today'}],metrics:[{name:'activeUsers'}] }),
+          gaReport(env, token, { dateRanges:[{startDate:'yesterday',endDate:'yesterday'}],metrics:[{name:'activeUsers'}] }),
+          gaReport(env, token, { dateRanges:[{startDate:'6daysAgo',endDate:'today'}],dimensions:[{name:'date'}],metrics:[{name:'activeUsers'}],orderBys:[{dimension:{dimensionName:'date'}}],limit:'7' }),
+          gaRealtimeReport(env, token, {metrics:[{name:'activeUsers'}]}),
+        ]);
+        return json({ok:true,generatedAt:new Date().toISOString(),source:'Google Analytics 4',metric:'activeUsers',today:metric(today.rows?.[0],0),yesterday:metric(yesterday.rows?.[0],0),last30Minutes:metric(realtime.rows?.[0],0),daily:(daily.rows||[]).map(row=>({date:dim(row,0),users:metric(row,0)})),note:'Today and yesterday use the GA4 property reporting time zone. Today is incomplete. The 30-minute metric counts recently active users, not a rolling 24-hour audience.'});
+      } catch(error) {return json({ok:false,error:'Visitor counts are temporarily unavailable.'},502);}
+    }
     if (url.pathname === '/api/ga-test') {
       try { return json({ ok:true, ...(await runGaTest(env)) }); }
       catch (error) { return json({ ok:false, error:error instanceof Error?error.message:String(error) },500); }
