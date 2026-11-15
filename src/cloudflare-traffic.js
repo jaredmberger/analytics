@@ -9,13 +9,11 @@ export async function traffic(request,env) {
   const end = new Date();
   const start = new Date(end.getTime()-(days-1)*86400000);
   const date = d=>d.toISOString().slice(0,10);
-  const query = `query Traffic($account: String!, $filter: AccountRumPageloadEventsAdaptiveGroupsFilter_InputObject) {
-    viewer { accounts(filter:{accountTag:$account}) {
-      rumPageloadEventsAdaptiveGroups(limit:35,filter:$filter) { count dimensions { date } }
-    } }
-  }`;
+  const account=env.CLOUDFLARE_ACCOUNT_ID;
+  if (!/^[a-f0-9]{32}$/i.test(account)) return json({ok:false,error:'Invalid account configuration'},503);
+  const query=`query { viewer { accounts(filter:{accountTag:"${account}"}) { rumPageloadEventsAdaptiveGroups(limit:35,filter:{siteTag:"${SITE_TAG}",datetime_geq:"${date(start)}T00:00:00Z",datetime_leq:"${end.toISOString()}"}) { count dimensions { date } } } } }`;
   try {
-    const response=await fetch(API,{method:'POST',headers:{authorization:'Bearer '+env.CLOUDFLARE_API_TOKEN,'content-type':'application/json'},body:JSON.stringify({query,variables:{account:env.CLOUDFLARE_ACCOUNT_ID,filter:{siteTag:SITE_TAG,datetime_geq:date(start)+'T00:00:00Z',datetime_leq:end.toISOString()}}})});
+    const response=await fetch(API,{method:'POST',headers:{authorization:'Bearer '+env.CLOUDFLARE_API_TOKEN,'content-type':'application/json'},body:JSON.stringify({query})});
     const payload=await response.json();
     if (!response.ok||payload.errors?.length) throw new Error('Cloudflare Analytics query failed');
     const groups=payload.data?.viewer?.accounts?.[0]?.rumPageloadEventsAdaptiveGroups;
